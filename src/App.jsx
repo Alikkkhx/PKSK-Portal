@@ -30,8 +30,8 @@ const ADMIN_NAME = 'Главный Админ'
 // APP ROOT
 // ==============================================================
 function App() {
-  const [user, setUser] = useState(storage.getUser())
-  const [lang, setLang] = useState(storage.getLanguage() || 'ru')
+  const [user, setUser] = useState(() => storage.getUser())
+  const [lang, setLang] = useState(() => storage.getLanguage() || 'ru')
   const [requests, setRequests] = useState([])
   const [messages, setMessages] = useState([])
   const [buildings, setBuildings] = useState([])
@@ -69,13 +69,16 @@ function App() {
     storage.logout()
   }
 
-  const sendMessage = (text, senderRole, senderName, buildingId) => {
+  const sendMessage = (text, senderRole, senderName, buildingId, type = 'general', recipientPhone = null) => {
     const msg = {
       id: Date.now(),
       text,
       sender: senderRole,
       username: senderName,
+      senderPhone: user.phone,
+      recipientPhone,
       buildingId,
+      type,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
     firebaseApi.sendMessage(msg)
@@ -313,7 +316,7 @@ function MainView({ requests, setRequests, messages, sendMessage, buildings }) {
         <main key={activeTab}>
           {activeTab === 'dashboard' && <ResidentDashboard t={t} requests={filteredRequests} setShowModal={setShowModal} stats={stats} />}
           {activeTab === 'admin' && <AdminDashboard t={t} requests={filteredRequests} stats={stats} />}
-          {activeTab === 'chat' && <ChatView messages={filteredMessages} sendMessage={(txt) => sendMessage(txt, user.role, user.name, user.role === 'admin' ? 'all' : user.buildingId)} role={user.role} />}
+          {activeTab === 'chat' && <ChatView user={user} buildings={buildings} messages={filteredMessages} sendMessage={(txt, mode, recipient) => sendMessage(txt, user.role, user.name, user.role === 'admin' ? 'all' : user.buildingId, mode, recipient)} role={user.role} />}
           {activeTab === 'profile' && <ProfileView user={user} />}
           {activeTab === 'servers' && <AdminControlCenter buildings={buildings} />}
         </main>
@@ -464,59 +467,156 @@ function AdminDashboard({ t, requests, stats }) {
 }
 
 // ==============================================================
-// CHAT VIEW
+// CHAT VIEW — THREADED SUPPORT & COMMUNITY
 // ==============================================================
-function ChatView({ messages, sendMessage, role }) {
+function ChatView({ messages, sendMessage, role, user, buildings }) {
   const [text, setText] = useState('')
+  const [chatMode, setChatMode] = useState('general') 
+  const [adminBldgFilter, setAdminBldgFilter] = useState('all')
+  const [activeThread, setActiveThread] = useState(null) // for Admin PKSK mode
   const bottomRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, chatMode, activeThread])
+
+  const buildingFiltered = messages.filter(m => {
+    if (role === 'resident') return m.buildingId === user.buildingId;
+    if (adminBldgFilter === 'all') return true;
+    return m.buildingId === adminBldgFilter;
+  });
+
+  const generalMessages = buildingFiltered.filter(m => m.type === 'general' || !m.type)
+  
+  const pkskMessages = buildingFiltered.filter(m => m.type === 'pksk');
+
+  // Logic for Admin to see threads (who sent messages)
+  const threads = [];
+  if (role === 'admin') {
+    const uniquePhones = [...new Set(pkskMessages.map(m => m.senderPhone).filter(p => p !== user.phone))];
+    uniquePhones.forEach(phone => {
+      const userMsgs = pkskMessages.filter(m => m.senderPhone === phone || m.recipientPhone === phone);
+      if (userMsgs.length > 0) {
+        threads.push({
+          phone,
+          username: userMsgs.find(m => m.senderPhone === phone)?.username || 'User',
+          buildingId: userMsgs[0].buildingId,
+          lastMsg: userMsgs[userMsgs.length - 1].text,
+          timestamp: userMsgs[userMsgs.length - 1].timestamp
+        });
+      }
+    });
+  }
+
+  const activeMessages = chatMode === 'general' 
+    ? generalMessages 
+    : (role === 'admin' 
+        ? pkskMessages.filter(m => m.senderPhone === activeThread || m.recipientPhone === activeThread)
+        : pkskMessages.filter(m => m.senderPhone === user.phone || m.recipientPhone === user.phone)
+      );
 
   const handleSend = () => {
     if (!text.trim()) return
-    sendMessage(text.trim())
+    const recipient = (role === 'admin' && chatMode === 'pksk') ? activeThread : null;
+    sendMessage(text.trim(), chatMode, recipient)
     setText('')
   }
 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 168px)' }}>
-      <h2 style={{ marginBottom: '14px' }}>Мессенджер</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+        <h2 style={{ color: 'var(--text-primary)', fontSize: '20px' }}>
+          {activeThread && role === 'admin' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <ArrowLeft size={20} onClick={() => setActiveThread(null)} style={{ cursor: 'pointer' }} />
+              Чат с жильцом
+            </div>
+          ) : 'Мессенджер'}
+        </h2>
+        
+        {role === 'admin' && !activeThread && (
+          <select 
+            style={{ width: 'auto', padding: '6px 12px', fontSize: '11px', borderRadius: '10px' }}
+            value={adminBldgFilter}
+            onChange={e => setAdminBldgFilter(e.target.value)}
+          >
+            <option value="all">Все ЖК</option>
+            {buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
+      </div>
+
+      <div className="chat-tabs">
+        <button className={`chat-tab-btn ${chatMode === 'general' ? 'active' : ''}`} onClick={() => { setChatMode('general'); setActiveThread(null); }}>
+          🏘 ЖК Community
+        </button>
+        <button className={`chat-tab-btn ${chatMode === 'pksk' ? 'active' : ''}`} onClick={() => setChatMode('pksk')}>
+          🏢 Admin Support
+        </button>
+      </div>
+
       <div className="glass-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {messages.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)' }}>
-              <MessageCircle size={40} style={{ opacity: 0.3, marginBottom: '10px' }} />
-              <p>Начните переписку с администрацией</p>
-            </div>
-          )}
-          {messages.map(m => (
-            <div key={m.id} style={{ alignSelf: m.sender === role ? 'flex-end' : 'flex-start', maxWidth: '80%', display: 'flex', flexDirection: 'column', alignItems: m.sender === role ? 'flex-end' : 'flex-start' }}>
-              <div style={{ padding: '11px 16px', background: m.sender === role ? 'var(--accent-gradient)' : 'var(--bg-secondary)', borderRadius: m.sender === role ? '20px 20px 4px 20px' : '20px 20px 20px 4px', border: m.sender === role ? 'none' : '1px solid var(--glass-border)', boxShadow: '0 3px 12px rgba(0,0,0,0.1)' }}>
-                <span style={{ fontSize: '10px', opacity: 0.75, display: 'block', marginBottom: '3px', fontWeight: 700 }}>{m.username}</span>
-                <p style={{ fontSize: '14px', lineHeight: '1.45' }}>{m.text}</p>
+        {role === 'admin' && chatMode === 'pksk' && !activeThread ? (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '10px' }}>
+            {threads.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)' }}>
+                <User size={40} style={{ opacity: 0.3, marginBottom: '10px' }} />
+                <p>Пока никто не писал в поддержку</p>
               </div>
-              <span style={{ fontSize: '9px', color: 'var(--text-dim)', marginTop: '3px' }}>{m.timestamp}</span>
+            ) : threads.map(t => (
+              <div key={t.phone} className="glass-card" style={{ padding: '16px', marginBottom: '10px', cursor: 'pointer', background: 'rgba(255,255,255,0.03)' }} onClick={() => setActiveThread(t.phone)}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ fontWeight: 700 }}>{t.username}</span>
+                  <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>{t.timestamp}</span>
+                </div>
+                <p style={{ fontSize: '12px', color: 'var(--neon-blue)', marginBottom: '4px' }}>ЖК: {buildings.find(b => b.id === t.buildingId)?.name || 'Неизвестно'}</p>
+                <p style={{ fontSize: '13px', color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.lastMsg}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {activeMessages.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)' }}>
+                  <MessageCircle size={36} style={{ opacity: 0.3, marginBottom: '10px' }} />
+                  <p>Сообщений пока нет</p>
+                </div>
+              )}
+              {activeMessages.map(m => {
+                const isOwn = m.senderPhone === user.phone
+                return (
+                  <div key={m.id} style={{ alignSelf: isOwn ? 'flex-end' : 'flex-start', maxWidth: '85%', display: 'flex', flexDirection: 'column', alignItems: isOwn ? 'flex-end' : 'flex-start' }}>
+                    <div style={{ padding: '10px 14px', background: isOwn ? 'var(--accent-gradient)' : 'rgba(255,255,255,0.06)', borderRadius: isOwn ? '18px 18px 4px 18px' : '18px 18px 18px 4px', border: isOwn ? 'none' : '1px solid var(--glass-border)' }}>
+                      {!isOwn && <span style={{ fontSize: '10px', opacity: 0.8, display: 'block', marginBottom: '3px', fontWeight: 800, color: 'var(--neon-blue)' }}>{m.username}</span>}
+                      <p style={{ fontSize: '14px', lineHeight: '1.4', color: 'var(--text-primary)' }}>{m.text}</p>
+                    </div>
+                    <span style={{ fontSize: '9px', color: 'var(--text-dim)', marginTop: '3px' }}>{m.timestamp}</span>
+                  </div>
+                )
+              })}
+              <div ref={bottomRef} />
             </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
-        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '10px' }}>
-          <input
-            type="text" placeholder="Написать сообщение..." value={text}
-            onChange={e => setText(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSend()}
-            style={{ flex: 1 }}
-          />
-          <button className="premium-btn" style={{ padding: '0 18px', flexShrink: 0 }} onClick={handleSend}>
-            <Send size={18} />
-          </button>
-        </div>
+            {(chatMode === 'general' || (chatMode === 'pksk' && (role === 'resident' || activeThread))) && (
+              <div style={{ padding: '12px 14px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '10px' }}>
+                <input
+                  type="text" placeholder="Введите сообщение..." value={text}
+                  onChange={e => setText(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSend()}
+                  style={{ flex: 1 }}
+                />
+                <button className="premium-btn" style={{ padding: '0 18px' }} onClick={handleSend} disabled={!text.trim()}>
+                  <Send size={18} />
+                </button>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </motion.div>
   )
 }
+
 
 // ==============================================================
 // ADMIN CONTROL CENTER (SERVERS)
