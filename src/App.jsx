@@ -5,6 +5,7 @@ import { Plus, X, Image as ImageIcon } from 'lucide-react';
 // API & Service
 import { firebaseApi } from './service/firebaseApi';
 import { useStore } from './store';
+import { fcmService } from './service/fcm';
 
 // Layouts & Views
 import { MainView } from './layouts/MainView';
@@ -53,12 +54,14 @@ export default function App() {
     // Professional session management
     const unsub = firebaseApi.onAuth(async (firebaseUser) => {
       if (firebaseUser) {
-        // Map internal phone back from email if needed, or just fetch doc
         const phone = firebaseUser.email.split('@')[0];
         const userData = await firebaseApi.getUser(phone);
         if (userData) {
           setUser({ ...userData, uid: firebaseUser.uid });
           localStorage.setItem('pksk_user', JSON.stringify(userData));
+          
+          // --- PUSH NOTIFICATIONS ---
+          fcmService.requestPermission(phone);
         }
       } else {
         setUser(null);
@@ -70,9 +73,15 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Real-time data listeners (independent of Auth listener, but depends on user state)
+  // Foreground messages & Real-time data listeners
   useEffect(() => {
     if (!user) return;
+
+    // Listen for foreground notifications
+    const unsubFCM = fcmService.onForegroundMessage((payload) => {
+      alert(`Новое уведомление: ${payload.notification.title}\n${payload.notification.body}`);
+    });
+
     const buildingCtx = user.role === 'admin' ? 'all' : user.buildingId;
     const unsubMsgs = firebaseApi.listenMessages(buildingCtx, (data) => setMessages(data), 20);
     const unsubReqs = firebaseApi.listenRequests(buildingCtx, (data) => setRequests(data), 15);
