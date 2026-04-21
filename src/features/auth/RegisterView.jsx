@@ -34,7 +34,7 @@ export function RegisterView({ onRegister, onSwitchToLogin, buildings, t }) {
 
       <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <input className="premium-input" placeholder="Ваше имя" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required />
-        <input className="premium-input" placeholder="Телефон" value={formData.phone} onChange={e => setPhone(e.target.value)} required />
+        <input className="premium-input" placeholder="Телефон" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} required />
         <input className="premium-input" type="password" placeholder="Пароль" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} required />
         
         <div style={{ display: 'flex', gap: '10px' }}>

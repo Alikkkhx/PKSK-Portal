@@ -22,5 +22,6 @@ export const useStore = create((set, get) => ({
     hasMoreRequests: older.length === 15
   })),
 
-  setHistoryLoading: (historyLoading) => set({ historyLoading })
+  setHistoryLoading: (historyLoading) => set({ historyLoading }),
+  setIsLoading: (isLoading) => set({ isLoading })
 }));

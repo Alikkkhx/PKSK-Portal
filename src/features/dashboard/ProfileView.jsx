@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { User, MapPin, Globe } from 'lucide-react';
-import { useAuth } from '../../App';
+import { useAuth } from '../../contexts';
 
 export function ProfileView({ user }) {
   const { logout } = useAuth();

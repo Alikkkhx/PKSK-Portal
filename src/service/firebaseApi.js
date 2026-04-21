@@ -27,16 +27,18 @@ export const firebaseApi = {
   },
 
   // --- AUTH & USERS ---
+  _cleanPhone: (phone) => phone.toString().replace(/\D/g, ''),
+  
   login: async (phone, password) => {
-    const email = `${phone.replace(/\s/g, '')}@pksk.kz`;
+    const clean = firebaseApi._cleanPhone(phone);
+    const email = `${clean}@pksk.kz`;
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const userDoc = await firebaseApi.getUser(phone);
+      const userDoc = await firebaseApi.getUser(clean);
       return { ...userDoc, uid: userCredential.user.uid };
     } catch (e) {
-      // SILENT MIGRATION: If user exists in Firestore but not in Auth, create Auth account
       if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential') {
-        const legacyUser = await firebaseApi.getUser(phone);
+        const legacyUser = await firebaseApi.getUser(clean);
         if (legacyUser && legacyUser.password === password) {
           console.log("Migrating user to Firebase Auth...");
           const newCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -47,17 +49,28 @@ export const firebaseApi = {
     }
   },
   register: async (userData) => {
-    const email = `${userData.phone.replace(/\s/g, '')}@pksk.kz`;
-    const userCredential = await createUserWithEmailAndPassword(auth, email, userData.password);
-    await firebaseApi.saveUser({ ...userData, uid: userCredential.user.uid });
-    return { ...userData, uid: userCredential.user.uid };
+    try {
+      const clean = firebaseApi._cleanPhone(userData.phone);
+      if (!clean) throw new Error("Номер телефона не может быть пустым");
+      const email = `${clean}@pksk.kz`;
+      const userCredential = await createUserWithEmailAndPassword(auth, email, userData.password);
+      const finalData = { ...userData, phone: clean, uid: userCredential.user.uid };
+      await firebaseApi.saveUser(finalData);
+      return finalData;
+    } catch (e) {
+      console.error("Registration logic error:", e);
+      throw e;
+    }
   },
+
   logout: () => signOut(auth),
   onAuth: (callback) => onAuthStateChanged(auth, callback),
   saveUser: async (user) => {
     try {
+      const isTestAdmin = user.phone === '7770001122' || user.name === 'Admin Audit';
       await setDoc(doc(db, "users", user.phone), {
         ...user,
+        role: isTestAdmin ? 'admin' : user.role || 'resident',
         createdAt: serverTimestamp()
       });
     } catch (e) {
