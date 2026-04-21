@@ -1,4 +1,10 @@
-import { db, storage } from './firebase';
+import { db, storage, auth } from './firebase';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut,
+  onAuthStateChanged 
+} from 'firebase/auth';
 import { 
   collection, addDoc, getDocs, onSnapshot, query, 
   orderBy, setDoc, doc, updateDoc, where, limit, 
@@ -20,7 +26,34 @@ export const firebaseApi = {
     }
   },
 
-  // --- USERS ---
+  // --- AUTH & USERS ---
+  login: async (phone, password) => {
+    const email = `${phone.replace(/\s/g, '')}@pksk.kz`;
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const userDoc = await firebaseApi.getUser(phone);
+      return { ...userDoc, uid: userCredential.user.uid };
+    } catch (e) {
+      // SILENT MIGRATION: If user exists in Firestore but not in Auth, create Auth account
+      if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential') {
+        const legacyUser = await firebaseApi.getUser(phone);
+        if (legacyUser && legacyUser.password === password) {
+          console.log("Migrating user to Firebase Auth...");
+          const newCredential = await createUserWithEmailAndPassword(auth, email, password);
+          return { ...legacyUser, uid: newCredential.user.uid };
+        }
+      }
+      throw e;
+    }
+  },
+  register: async (userData) => {
+    const email = `${userData.phone.replace(/\s/g, '')}@pksk.kz`;
+    const userCredential = await createUserWithEmailAndPassword(auth, email, userData.password);
+    await firebaseApi.saveUser({ ...userData, uid: userCredential.user.uid });
+    return { ...userData, uid: userCredential.user.uid };
+  },
+  logout: () => signOut(auth),
+  onAuth: (callback) => onAuthStateChanged(auth, callback),
   saveUser: async (user) => {
     try {
       await setDoc(doc(db, "users", user.phone), {

@@ -2,34 +2,56 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // Вспомогательная функция для проверки авторизации
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Вспомогательная функция для получения данных текущего пользователя
+    function getUserData() {
+      // Ищем пользователя по UID (рекомендуется) или по номеру телефона
+      // Для текущей структуры иерархия документов может быть сложной.
+      // Предположим, мы храним UID в документе пользователя.
+      return get(/databases/$(database)/documents/users/$(request.auth.token.email.split('@')[0])).data;
+    }
+
     // --- ПОЛЬЗОВАТЕЛИ ---
     match /users/{phone} {
-      // Разрешаем регистрацию (создание)
-      allow create: if true;
-      // Разрешаем чтение только своего профиля
-      // (ВНИМАНИЕ: Для полной безопасности требуется Firebase Auth)
-      allow get: if true; 
-      allow list: if false; // Запрещаем выкачивать весь список!
+      allow create: if true; // Разрешаем регистрацию
+      // Разрешаем чтение своего профиля или админу
+      allow get: if isSignedIn() && (request.auth.token.email.split('@')[0] == phone || getUserData().role == 'admin');
+      allow list: if isSignedIn() && getUserData().role == 'admin';
     }
     
     // --- СООБЩЕНИЯ ---
     match /messages/{messageId} {
-      // Разрешаем чтение, если запрос содержит фильтр по buildingId
-      // и он соответствует buildingId пользователя (нужна авторизация)
-      allow read: if true; 
-      allow write: if true;
+      // Разрешаем чтение, если пользователь состоит в этом ЖК или админ
+      allow read: if isSignedIn() && (
+        resource.data.buildingId == getUserData().buildingId || 
+        getUserData().role == 'admin'
+      );
+      // Разрешаем писать сообщения в свой ЖК
+      allow create: if isSignedIn() && (
+        request.resource.data.buildingId == getUserData().buildingId || 
+        getUserData().role == 'admin'
+      );
+      allow update, delete: if isSignedIn() && getUserData().role == 'admin';
     }
     
     // --- ЗАЯВКИ ---
     match /requests/{requestId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if isSignedIn() && (
+        resource.data.buildingId == getUserData().buildingId || 
+        getUserData().role == 'admin'
+      );
+      allow create: if isSignedIn(); 
+      allow update, delete: if isSignedIn() && getUserData().role == 'admin';
     }
     
-    // --- ЗДАНИЯ (ЖК) ---
+    // --- ЗДАНИЯ ---
     match /buildings/{buildingId} {
       allow read: if true; // Нужно для регистрации
-      allow write: if false; // Только вручную через консоль или админа
+      allow write: if isSignedIn() && getUserData().role == 'admin';
     }
   }
 }
