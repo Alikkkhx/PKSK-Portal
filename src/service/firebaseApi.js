@@ -1,16 +1,47 @@
-import { db } from './firebase';
-import { collection, addDoc, getDocs, onSnapshot, query, orderBy, setDoc, doc, updateDoc } from 'firebase/firestore';
+import { db, storage } from './firebase';
+import { 
+  collection, addDoc, getDocs, onSnapshot, query, 
+  orderBy, setDoc, doc, updateDoc, where, limit, 
+  startAfter, getDoc, serverTimestamp 
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 export const firebaseApi = {
+  // --- UPLOAD ---
+  uploadFile: async (file) => {
+    if (!file) return null;
+    try {
+      const storageRef = ref(storage, `uploads/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(storageRef, file);
+      return await getDownloadURL(snapshot.ref);
+    } catch (e) {
+      console.error("Upload error:", e);
+      return null;
+    }
+  },
+
   // --- USERS ---
   saveUser: async (user) => {
     try {
-      await setDoc(doc(db, "users", user.phone), user);
+      await setDoc(doc(db, "users", user.phone), {
+        ...user,
+        createdAt: serverTimestamp()
+      });
     } catch (e) {
       console.error("Error saving user: ", e);
     }
   },
+  getUser: async (phone) => {
+    try {
+      const snap = await getDoc(doc(db, "users", phone));
+      return snap.exists() ? snap.data() : null;
+    } catch (e) {
+      console.error("Error getting user: ", e);
+      return null;
+    }
+  },
   getUsers: async () => {
+    // Keeping for migration/admin purposes but marking as legacy/restricted
     try {
       const snap = await getDocs(collection(db, "users"));
       return snap.docs.map(d => d.data());
@@ -21,16 +52,47 @@ export const firebaseApi = {
   },
 
   // --- MESSAGES ---
-  listenMessages: (buildingId, callback) => {
-    const q = query(collection(db, "messages"));
+  listenMessages: (buildingId, callback, limitCount = 50) => {
+    let q;
+    if (buildingId === 'all') {
+      q = query(collection(db, "messages"), orderBy("createdAt", "desc"), limit(limitCount));
+    } else {
+      q = query(
+        collection(db, "messages"), 
+        where("buildingId", "==", buildingId), 
+        orderBy("createdAt", "desc"), 
+        limit(limitCount)
+      );
+    }
+    
     return onSnapshot(q, (snap) => {
-      const msgs = snap.docs.map(d => d.data()).sort((a, b) => a.id - b.id);
-      callback(buildingId === 'all' ? msgs : msgs.filter(m => m.buildingId === buildingId));
+      const msgs = snap.docs.map(d => ({ ...d.data(), _doc: d })).reverse();
+      callback(msgs);
     });
+  },
+  fetchPreviousMessages: async (buildingId, lastDoc, limitCount = 20) => {
+    try {
+      let q;
+      const constraints = [orderBy("createdAt", "desc"), startAfter(lastDoc), limit(limitCount)];
+      if (buildingId !== 'all') {
+        constraints.unshift(where("buildingId", "==", buildingId));
+      }
+      q = query(collection(db, "messages"), ...constraints);
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ ...d.data(), _doc: d }));
+    } catch (e) {
+      console.error("Error fetching history: ", e);
+      return [];
+    }
   },
   sendMessage: async (msg) => {
     try {
-      await setDoc(doc(db, "messages", msg.id.toString()), msg);
+      const msgId = Date.now().toString();
+      await setDoc(doc(db, "messages", msgId), {
+        ...msg,
+        id: msgId,
+        createdAt: serverTimestamp()
+      });
     } catch (e) {
       console.error("Error sending message: ", e);
     }
@@ -51,16 +113,46 @@ export const firebaseApi = {
   },
 
   // --- REQUESTS ---
-  listenRequests: (buildingId, callback) => {
-    const q = query(collection(db, "requests"));
+  listenRequests: (buildingId, callback, limitCount = 20) => {
+    let q;
+    if (buildingId === 'all') {
+      q = query(collection(db, "requests"), orderBy("createdAt", "desc"), limit(limitCount));
+    } else {
+      q = query(
+        collection(db, "requests"), 
+        where("buildingId", "==", buildingId), 
+        orderBy("createdAt", "desc"), 
+        limit(limitCount)
+      );
+    }
     return onSnapshot(q, (snap) => {
-      const reqs = snap.docs.map(d => d.data()).sort((a, b) => b.id - a.id);
-      callback(buildingId === 'all' ? reqs : reqs.filter(r => r.buildingId === buildingId));
+      const reqs = snap.docs.map(d => ({ ...d.data(), _doc: d }));
+      callback(reqs);
     });
+  },
+  fetchPreviousRequests: async (buildingId, lastDoc, limitCount = 20) => {
+    try {
+      let q;
+      const constraints = [orderBy("createdAt", "desc"), startAfter(lastDoc), limit(limitCount)];
+      if (buildingId !== 'all') {
+        constraints.unshift(where("buildingId", "==", buildingId));
+      }
+      q = query(collection(db, "requests"), ...constraints);
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ ...d.data(), _doc: d }));
+    } catch (e) {
+      console.error("Error fetching more requests: ", e);
+      return [];
+    }
   },
   saveRequest: async (req) => {
     try {
-      await setDoc(doc(db, "requests", req.id.toString()), req);
+      const reqId = Date.now().toString();
+      await setDoc(doc(db, "requests", reqId), {
+        ...req,
+        id: reqId,
+        createdAt: serverTimestamp()
+      });
     } catch (e) {
       console.error("Error saving request: ", e);
     }

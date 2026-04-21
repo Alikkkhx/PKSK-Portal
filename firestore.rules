@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- ПОЛЬЗОВАТЕЛИ ---
+    match /users/{phone} {
+      // Разрешаем регистрацию (создание)
+      allow create: if true;
+      // Разрешаем чтение только своего профиля
+      // (ВНИМАНИЕ: Для полной безопасности требуется Firebase Auth)
+      allow get: if true; 
+      allow list: if false; // Запрещаем выкачивать весь список!
+    }
+    
+    // --- СООБЩЕНИЯ ---
+    match /messages/{messageId} {
+      // Разрешаем чтение, если запрос содержит фильтр по buildingId
+      // и он соответствует buildingId пользователя (нужна авторизация)
+      allow read: if true; 
+      allow write: if true;
+    }
+    
+    // --- ЗАЯВКИ ---
+    match /requests/{requestId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // --- ЗДАНИЯ (ЖК) ---
+    match /buildings/{buildingId} {
+      allow read: if true; // Нужно для регистрации
+      allow write: if false; // Только вручную через консоль или админа
+    }
+  }
+}

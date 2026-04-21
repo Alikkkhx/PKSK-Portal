@@ -4,7 +4,7 @@ import {
   Home, MessageCircle, User, PlusCircle,
   ArrowLeft, Send, Languages, LayoutDashboard,
   ShieldCheck, LogOut, Clock, CheckCircle2,
-  Phone, UserPlus, Key, Building2, Server, Eye, EyeOff
+  Phone, UserPlus, Key, Building2, Server, Eye, EyeOff, Camera, Image as ImageIcon, XCircle
 } from 'lucide-react'
 import { storage } from './service/storage'
 import { firebaseApi } from './service/firebaseApi'
@@ -27,6 +27,17 @@ const ADMIN_PASSWORD = 'admin123'
 const ADMIN_NAME = 'Главный Админ'
 
 // ==============================================================
+// COMPONENTS: SKELETON
+// ==============================================================
+const SkeletonCard = () => (
+  <div className="glass-card skeleton-card" style={{ height: '140px', marginBottom: '15px' }}>
+    <div className="skeleton" style={{ height: '20px', width: '40%', marginBottom: '15px' }} />
+    <div className="skeleton" style={{ height: '15px', width: '90%', marginBottom: '8px' }} />
+    <div className="skeleton" style={{ height: '15px', width: '70%' }} />
+  </div>
+)
+
+// ==============================================================
 // APP ROOT
 // ==============================================================
 function App() {
@@ -36,6 +47,7 @@ function App() {
   const [messages, setMessages] = useState([])
   const [buildings, setBuildings] = useState([])
   const [isRegistering, setIsRegistering] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
   // Постоянно слушаем список зданий (нужен даже без авторизации — для регистрации)
   useEffect(() => {
@@ -45,10 +57,24 @@ function App() {
 
   // Подписка на данные после входа
   useEffect(() => {
-    if (!user) return
+    if (!user) {
+      setIsLoading(false)
+      return
+    }
+    setIsLoading(true)
     const buildingCtx = user.role === 'admin' ? 'all' : user.buildingId
-    const unsubMsgs = firebaseApi.listenMessages(buildingCtx, setMessages)
-    const unsubReqs = firebaseApi.listenRequests(buildingCtx, setRequests)
+    
+    // Постоянные слушатели для реального времени
+    const unsubMsgs = firebaseApi.listenMessages(buildingCtx, (data) => {
+      setMessages(data)
+      setIsLoading(false)
+    }, 20) // Слушаем только последние 20
+
+    const unsubReqs = firebaseApi.listenRequests(buildingCtx, (data) => {
+      setRequests(data)
+      setIsLoading(false) 
+    }, 15) // Последние 15 заявок
+    
     return () => { unsubMsgs(); unsubReqs() }
   }, [user])
 
@@ -102,6 +128,7 @@ function App() {
           requests={requests}
           setRequests={setRequests}
           messages={messages}
+          setMessages={setMessages}
           sendMessage={sendMessage}
           buildings={buildings}
         />
@@ -142,8 +169,7 @@ function LoginView({ onLogin, onSwitch, toggleLang, lang }) {
         return
       }
       // Resident check
-      const allUsers = await firebaseApi.getUsers()
-      const found = allUsers.find(u => u.phone.replace(/\s/g, '') === cleanPhone)
+      const found = await firebaseApi.getUser(cleanPhone)
       if (!found) { setError('Аккаунт не найден. Пройдите регистрацию.'); return }
       if (found.password !== password) { setError('Неверный пароль.'); return }
       onLogin(found)
@@ -276,20 +302,50 @@ function RegisterView({ onRegister, onSwitch, buildings }) {
 // ==============================================================
 // MAIN SHELL
 // ==============================================================
-function MainView({ requests, setRequests, messages, sendMessage, buildings }) {
+function MainView({ requests, setRequests, messages, setMessages, sendMessage, buildings }) {
   const { user, logout } = useAuth()
   const { t, lang, toggleLang } = useI18n()
   const [activeTab, setActiveTab] = useState(user.role === 'admin' ? 'admin' : 'dashboard')
   const [showModal, setShowModal] = useState(false)
-
-  const filteredRequests = user.role === 'admin' ? requests : requests.filter(r => r.buildingId === user.buildingId)
-  const filteredMessages = user.role === 'admin' ? messages : messages.filter(m => m.buildingId === user.buildingId)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [hasMoreMessages, setHasMoreMessages] = useState(true)
+  const [hasMoreRequests, setHasMoreRequests] = useState(true)
 
   const stats = {
-    total: filteredRequests.length,
-    pending: filteredRequests.filter(r => r.status === 'pending').length,
-    inProgress: filteredRequests.filter(r => r.status === 'progress').length,
-    completed: filteredRequests.filter(r => r.status === 'completed').length
+    total: requests.length,
+    pending: requests.filter(r => r.status === 'pending').length,
+    inProgress: requests.filter(r => r.status === 'progress').length,
+    completed: requests.filter(r => r.status === 'completed').length
+  }
+
+  const loadMoreMessages = async () => {
+    if (messages.length === 0 || loadingHistory || !hasMoreMessages) return
+    setLoadingHistory(true)
+    const lastDoc = messages[0]._doc 
+    const buildingCtx = user.role === 'admin' ? 'all' : user.buildingId
+    const older = await firebaseApi.fetchPreviousMessages(buildingCtx, lastDoc, 20)
+    if (older.length > 0) {
+      setMessages(prev => [...older.reverse(), ...prev])
+      if (older.length < 20) setHasMoreMessages(false)
+    } else {
+      setHasMoreMessages(false)
+    }
+    setLoadingHistory(false)
+  }
+
+  const loadMoreRequests = async () => {
+    if (requests.length === 0 || loadingHistory || !hasMoreRequests) return
+    setLoadingHistory(true)
+    const lastDoc = requests[requests.length - 1]._doc
+    const buildingCtx = user.role === 'admin' ? 'all' : user.buildingId
+    const older = await firebaseApi.fetchPreviousRequests(buildingCtx, lastDoc, 15)
+    if (older.length > 0) {
+      setRequests(prev => [...prev, ...older])
+      if (older.length < 15) setHasMoreRequests(false)
+    } else {
+      setHasMoreRequests(false)
+    }
+    setLoadingHistory(false)
   }
 
   return (
@@ -314,9 +370,9 @@ function MainView({ requests, setRequests, messages, sendMessage, buildings }) {
       {/* Page */}
       <AnimatePresence mode="wait">
         <main key={activeTab}>
-          {activeTab === 'dashboard' && <ResidentDashboard t={t} requests={filteredRequests} setShowModal={setShowModal} stats={stats} />}
-          {activeTab === 'admin' && <AdminDashboard t={t} requests={filteredRequests} stats={stats} />}
-          {activeTab === 'chat' && <ChatView user={user} buildings={buildings} messages={filteredMessages} sendMessage={(txt, mode, recipient) => sendMessage(txt, user.role, user.name, user.role === 'admin' ? 'all' : user.buildingId, mode, recipient)} role={user.role} />}
+          {activeTab === 'dashboard' && <ResidentDashboard t={t} requests={requests} setShowModal={setShowModal} stats={stats} onLoadMore={loadMoreRequests} loadingHistory={loadingHistory} hasMore={hasMoreRequests} />}
+          {activeTab === 'admin' && <AdminDashboard t={t} requests={requests} stats={stats} onLoadMore={loadMoreRequests} loadingHistory={loadingHistory} hasMore={hasMoreRequests} />}
+          {activeTab === 'chat' && <ChatView user={user} buildings={buildings} messages={messages} sendMessage={(txt, mode, recipient) => sendMessage(txt, user.role, user.name, user.role === 'admin' ? 'all' : user.buildingId, mode, recipient)} role={user.role} onLoadMore={loadMoreMessages} loadingHistory={loadingHistory} hasMore={hasMoreMessages} />}
           {activeTab === 'profile' && <ProfileView user={user} />}
           {activeTab === 'servers' && <AdminControlCenter buildings={buildings} />}
         </main>
@@ -388,23 +444,45 @@ function ResidentDashboard({ t, requests, setShowModal, stats }) {
       </div>
 
       <h3 style={{ marginBottom: '14px' }}>Ваши заявки</h3>
-      {requests.length === 0 ? (
+      {isLoading && requests.length === 0 ? (
+        <>
+          <SkeletonCard />
+          <SkeletonCard />
+        </>
+      ) : requests.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)' }}>
           <Clock size={40} style={{ marginBottom: '10px', opacity: 0.3 }} />
           <p>Активных заявок пока нет</p>
         </div>
       ) : (
-        requests.map(req => (
-          <div key={req.id} className="glass-card" style={{ padding: '16px', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <span style={{ fontWeight: 700 }}>{req.category}</span>
-              <span style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', background: statusColor[req.status] + '22', color: statusColor[req.status], fontWeight: 700 }}>
-                {statusLabel[req.status]}
-              </span>
+        <>
+          {requests.map(req => (
+            <div key={req.id} className="glass-card" style={{ padding: '16px', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontWeight: 700 }}>{req.category}</span>
+                <span style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', background: statusColor[req.status] + '22', color: statusColor[req.status], fontWeight: 700 }}>
+                  {statusLabel[req.status]}
+                </span>
+              </div>
+              {req.imageUrl && (
+                <div style={{ marginBottom: '12px', height: '140px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
+                  <img src={req.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onClick={() => window.open(req.imageUrl, '_blank')} />
+                </div>
+              )}
+              <p style={{ fontSize: '13px', color: 'var(--text-dim)' }}>{req.description}</p>
             </div>
-            <p style={{ fontSize: '13px', color: 'var(--text-dim)' }}>{req.description}</p>
-          </div>
-        ))
+          ))}
+          {hasMore && requests.length >= 15 && (
+            <button 
+              className="premium-btn" 
+              style={{ width: '100%', background: 'transparent', border: '1px solid var(--glass-border)', marginTop: '10px' }} 
+              onClick={onLoadMore} 
+              disabled={loadingHistory}
+            >
+              {loadingHistory ? '...' : t('load_more')}
+            </button>
+          )}
+        </>
       )}
     </motion.div>
   )
@@ -435,32 +513,56 @@ function AdminDashboard({ t, requests, stats }) {
       </div>
 
       <h4 style={{ marginBottom: '12px' }}>Очередь заявок</h4>
-      {requests.length === 0 ? (
+      {isLoading && requests.length === 0 ? (
+        <>
+          <SkeletonCard />
+          <SkeletonCard />
+        </>
+      ) : requests.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)' }}>
           <CheckCircle2 size={40} style={{ marginBottom: '10px', opacity: 0.3 }} />
           <p>Заявок нет</p>
         </div>
       ) : (
-        <div className="glass-card" style={{ overflow: 'hidden', marginBottom: '16px' }}>
-          {requests.map((req, i) => (
-            <div key={req.id} style={{ padding: '16px', borderBottom: i < requests.length - 1 ? '1px solid var(--glass-border)' : 'none' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <div>
-                  <span style={{ fontWeight: 700 }}>{req.category}</span>
-                  <p style={{ fontSize: '11px', color: 'var(--neon-blue)', marginTop: '2px' }}>{req.buildingName} {req.residentName ? `• ${req.residentName}` : ''}</p>
+        <>
+          <div className="glass-card" style={{ overflow: 'hidden', marginBottom: '16px' }}>
+            {requests.map((req, i) => (
+              <div key={req.id} style={{ padding: '16px', borderBottom: i < requests.length - 1 ? '1px solid var(--glass-border)' : 'none' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <div>
+                    <span style={{ fontWeight: 700 }}>{req.category}</span>
+                    <p style={{ fontSize: '11px', color: 'var(--neon-blue)', marginTop: '2px' }}>{req.buildingName} {req.residentName ? `• ${req.residentName}` : ''}</p>
+                  </div>
+                  <span style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', background: statusColor[req.status] + '22', color: statusColor[req.status], fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    {statusLabel[req.status]}
+                  </span>
                 </div>
-                <span style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', background: statusColor[req.status] + '22', color: statusColor[req.status], fontWeight: 700, whiteSpace: 'nowrap' }}>
-                  {statusLabel[req.status]}
-                </span>
+                
+                {req.imageUrl && (
+                  <div style={{ marginBottom: '10px', height: '100px', width: '100px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--glass-border)', cursor: 'pointer' }}>
+                    <img src={req.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onClick={() => window.open(req.imageUrl, '_blank')} />
+                  </div>
+                )}
+                
+                <p style={{ fontSize: '13px', color: 'var(--text-dim)', marginBottom: '10px' }}>{req.description}</p>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {req.status !== 'progress' && <button className="premium-btn" style={{ padding: '5px 14px', fontSize: '11px' }} onClick={() => updateStatus(req.id, 'progress')}>В работу</button>}
+                  {req.status !== 'completed' && <button className="premium-btn" style={{ padding: '5px 14px', fontSize: '11px', background: '#36b37e' }} onClick={() => updateStatus(req.id, 'completed')}>Завершить</button>}
+                </div>
               </div>
-              <p style={{ fontSize: '13px', color: 'var(--text-dim)', marginBottom: '10px' }}>{req.description}</p>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {req.status !== 'progress' && <button className="premium-btn" style={{ padding: '5px 14px', fontSize: '11px' }} onClick={() => updateStatus(req.id, 'progress')}>В работу</button>}
-                {req.status !== 'completed' && <button className="premium-btn" style={{ padding: '5px 14px', fontSize: '11px', background: '#36b37e' }} onClick={() => updateStatus(req.id, 'completed')}>Завершить</button>}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+          {hasMore && requests.length >= 15 && (
+            <button 
+              className="premium-btn" 
+              style={{ width: '100%', background: 'transparent', border: '1px solid var(--glass-border)', marginBottom: '20px' }} 
+              onClick={onLoadMore} 
+              disabled={loadingHistory}
+            >
+              {loadingHistory ? '...' : t('load_more')}
+            </button>
+          )}
+        </>
       )}
     </motion.div>
   )
@@ -577,6 +679,15 @@ function ChatView({ messages, sendMessage, role, user, buildings }) {
         ) : (
           <>
             <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {hasMore && activeMessages.length >= 20 && (
+                <button 
+                  style={{ background: 'transparent', border: 'none', color: 'var(--neon-blue)', fontSize: '12px', padding: '10px', cursor: 'pointer' }}
+                  onClick={onLoadMore}
+                  disabled={loadingHistory}
+                >
+                  {loadingHistory ? '...' : `↑ ${t('load_older')}`}
+                </button>
+              )}
               {activeMessages.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)' }}>
                   <MessageCircle size={36} style={{ opacity: 0.3, marginBottom: '10px' }} />
@@ -702,33 +813,85 @@ function ProfileView({ user }) {
 // ==============================================================
 // NEW REQUEST MODAL
 // ==============================================================
-function NewRequestModal({ onClose, onSubmit }) {
+function NewRequestModal({ user, onClose, onSubmit }) {
   const [desc, setDesc] = useState('')
   const [cat, setCat] = useState('Сантехника')
+  const [file, setFile] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const fileRef = useRef()
   const categories = ['Сантехника', 'Электрика', 'Лифт', 'Уборка мест общего пользования', 'Отопление', 'Другое']
+
+  const handleFile = (e) => {
+    if (e.target.files[0]) setFile(e.target.files[0])
+  }
+
+  const handleSumbit = async () => {
+    if (!desc.trim()) return alert('Опишите проблему')
+    setLoading(true)
+    try {
+      const imageUrl = await firebaseApi.uploadFile(file)
+      await onSubmit({
+        userId: user.phone,
+        userName: user.name,
+        buildingId: user.buildingId,
+        category: cat,
+        description: desc,
+        imageUrl,
+        status: 'pending',
+        date: new Date().toISOString()
+      })
+      onClose()
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)', padding: '24px', display: 'flex', alignItems: 'center' }}
     >
-      <div className="glass-card" style={{ width: '100%', padding: '24px' }}>
+      <div className="glass-card" style={{ width: '100%', padding: '24px', maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: '24px' }}>
           <ArrowLeft size={24} style={{ cursor: 'pointer' }} onClick={onClose} />
           <h2 style={{ marginLeft: '12px' }}>Новая заявка</h2>
         </div>
+        
         <label style={{ fontSize: '12px', color: 'var(--text-dim)' }}>Категория</label>
         <select value={cat} onChange={e => setCat(e.target.value)} style={{ marginTop: '8px', marginBottom: '18px' }}>
-          {categories.map(c => <option key={c}>{c}</option>)}
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
+
         <label style={{ fontSize: '12px', color: 'var(--text-dim)' }}>Описание проблемы</label>
         <textarea rows="4" style={{ marginTop: '8px', marginBottom: '20px' }} value={desc} onChange={e => setDesc(e.target.value)} placeholder="Опишите проблему подробно..." />
-        <button className="premium-btn" style={{ width: '100%' }} onClick={() => {
-          if (!desc.trim()) return alert('Пожалуйста, опишите проблему')
-          onSubmit({ id: Date.now(), category: cat, description: desc, status: 'pending', date: new Date().toISOString() })
-          onClose()
-        }}>
-          Отправить заявку
+
+        <div 
+          onClick={() => fileRef.current.click()}
+          style={{ 
+            height: '100px', border: '2px dashed var(--glass-border)', borderRadius: '12px', 
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', 
+            gap: '8px', marginBottom: '24px', cursor: 'pointer', background: file ? 'rgba(0,210,255,0.05)' : 'transparent',
+            position: 'relative', overflow: 'hidden'
+          }}
+        >
+          <input type="file" ref={fileRef} hidden accept="image/*" onChange={handleFile} />
+          {file ? (
+            <>
+              <img src={URL.createObjectURL(file)} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.5 }} />
+              <div style={{ position: 'absolute', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, fontSize: '13px' }}>
+                <CheckCircle2 size={16} /> Фото выбрано
+              </div>
+            </>
+          ) : (
+            <>
+              <Camera size={24} color="var(--text-dim)" />
+              <span style={{ fontSize: '13px', color: 'var(--text-dim)' }}>Прикрепить фото</span>
+            </>
+          )}
+        </div>
+
+        <button className="premium-btn" style={{ width: '100%' }} onClick={handleSumbit} disabled={loading}>
+          {loading ? 'Загрузка...' : 'Отправить заявку'}
         </button>
       </div>
     </motion.div>
