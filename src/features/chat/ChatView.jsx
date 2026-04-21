@@ -1,6 +1,33 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { FixedSizeList as List } from 'react-window';
 import { Send, MessageCircle, Info, Clock, CheckCircle2, ChevronRight, User, Settings, Image as ImageIcon, Plus, X, Globe, MapPin, Search } from 'lucide-react';
+
+const MessageRow = memo(({ data, index, style }) => {
+  const { messages, role } = data;
+  const m = messages[index];
+  
+  return (
+    <div style={{ ...style, display: 'flex', flexDirection: 'column', padding: '0 16px' }}>
+      <div style={{ alignSelf: m.senderRole === role ? 'flex-end' : 'flex-start', maxWidth: '85%', marginBottom: '8px' }}>
+        <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '4px', textAlign: m.senderRole === role ? 'right' : 'left' }}>
+          {m.senderName} • {m.createdAt?.toDate?.() ? m.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+        </div>
+        <div style={{ 
+          padding: '10px 14px', 
+          borderRadius: '16px', 
+          background: m.senderRole === role ? 'var(--neon-blue)' : 'rgba(255,255,255,0.08)',
+          color: m.senderRole === role ? 'white' : 'var(--text-main)',
+          fontSize: '14px',
+          border: m.senderRole === role ? 'none' : '1px solid var(--glass-border)',
+          lineHeight: '1.4'
+        }}>
+          {m.text}
+        </div>
+      </div>
+    </div>
+  );
+});
 
 export function ChatView({ user, buildings, messages, sendMessage, role, onLoadMore, loadingHistory, hasMore }) {
   const [msgInput, setMsgInput] = useState('');
@@ -9,15 +36,16 @@ export function ChatView({ user, buildings, messages, sendMessage, role, onLoadM
   const [selectedBuilding, setSelectedBuilding] = useState(user.buildingId || (buildings[0]?.id || ''));
   const scrollRef = useRef(null);
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
-
   const activeMessages = role === 'admin' 
     ? messages.filter(m => m.buildingId === selectedBuilding && (m.mode === activeTab))
     : messages;
+
+  useEffect(() => {
+    if (activeMessages.length > 0 && scrollRef.current) {
+      scrollRef.current.scrollToItem(activeMessages.length - 1, 'end');
+    }
+  }, [activeMessages.length]);
+
 
   const handleSend = () => {
     if (!msgInput.trim()) return;
@@ -63,40 +91,35 @@ export function ChatView({ user, buildings, messages, sendMessage, role, onLoadM
         </div>
       )}
 
-      {/* Messages */}
-      <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }} ref={scrollRef}>
-        {hasMore && activeMessages.length >= 20 && (
-          <button 
-            style={{ background: 'transparent', border: 'none', color: 'var(--neon-blue)', fontSize: '12px', padding: '10px', cursor: 'pointer' }}
-            onClick={onLoadMore}
-            disabled={loadingHistory}
-          >
-            {loadingHistory ? '...' : '↑ Загрузить историю'}
-          </button>
-        )}
-        {activeMessages.length === 0 && (
+      <div style={{ flex: 1, padding: '8px 0', overflow: 'hidden' }}>
+        {activeMessages.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)' }}>
             <MessageCircle size={36} style={{ opacity: 0.3, marginBottom: '10px' }} />
             <p>Нет сообщений</p>
           </div>
+        ) : (
+          <>
+            {hasMore && activeMessages.length >= 20 && (
+              <button 
+                style={{ width: '100%', background: 'transparent', border: 'none', color: 'var(--neon-blue)', fontSize: '11px', padding: '8px', cursor: 'pointer' }}
+                onClick={onLoadMore}
+                disabled={loadingHistory}
+              >
+                {loadingHistory ? '...' : '↑ Загрузить историю'}
+              </button>
+            )}
+            <List
+              ref={scrollRef}
+              height={500} // This should ideally be measured dynamically or fixed
+              itemCount={activeMessages.length}
+              itemSize={80} // Fixed height for simplicity in production baseline
+              width={'100%'}
+              itemData={{ messages: activeMessages, role }}
+            >
+              {MessageRow}
+            </List>
+          </>
         )}
-        {activeMessages.map((m, i) => (
-          <div key={m.id || i} style={{ alignSelf: m.senderRole === role ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
-            <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '4px', marginLeft: m.senderRole === role ? '0' : '8px', textAlign: m.senderRole === role ? 'right' : 'left' }}>
-              {m.senderName} • {m.createdAt?.toDate?.() ? m.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
-            </div>
-            <div style={{ 
-              padding: '10px 14px', 
-              borderRadius: '16px', 
-              background: m.senderRole === role ? 'var(--neon-blue)' : 'rgba(255,255,255,0.08)',
-              color: m.senderRole === role ? 'white' : 'var(--text-main)',
-              fontSize: '14px',
-              border: m.senderRole === role ? 'none' : '1px solid var(--glass-border)'
-            }}>
-              {m.text}
-            </div>
-          </div>
-        ))}
       </div>
 
       {/* Input */}

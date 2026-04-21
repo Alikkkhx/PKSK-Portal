@@ -6,6 +6,7 @@ import { Plus, X, Image as ImageIcon } from 'lucide-react';
 import { firebaseApi } from './service/firebaseApi';
 import { useStore } from './store';
 import { fcmService } from './service/fcm';
+import { ToastProvider, useToast } from './components/common/Toast';
 
 // Layouts & Views
 import { MainView } from './layouts/MainView';
@@ -27,7 +28,16 @@ export const useAuth = () => useContext(AuthContext);
 export const useI18n = () => useContext(I18nContext);
 
 export default function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
+  );
+}
+
+function AppContent() {
   const [user, setUser] = useState(null);
+  const { showToast } = useToast();
   const [lang, setLang] = useState(localStorage.getItem('pksk_lang') || 'ru');
   const [isRegistering, setIsRegistering] = useState(false);
   const [buildings, setBuildings] = useState([]);
@@ -79,7 +89,7 @@ export default function App() {
 
     // Listen for foreground notifications
     const unsubFCM = fcmService.onForegroundMessage((payload) => {
-      alert(`Новое уведомление: ${payload.notification.title}\n${payload.notification.body}`);
+      showToast(`${payload.notification.title}: ${payload.notification.body}`, 'info');
     });
 
     const buildingCtx = user.role === 'admin' ? 'all' : user.buildingId;
@@ -87,6 +97,11 @@ export default function App() {
     const unsubReqs = firebaseApi.listenRequests(buildingCtx, (data) => setRequests(data), 15);
     return () => { unsubMsgs(); unsubReqs(); };
   }, [user, setMessages, setRequests]);
+
+  const handleLogin = (userData) => {
+    setUser(userData);
+    localStorage.setItem('pksk_user', JSON.stringify(userData));
+  };
 
   const logout = () => {
     firebaseApi.logout();
