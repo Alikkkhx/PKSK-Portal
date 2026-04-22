@@ -21,11 +21,16 @@ export function NewRequestModal({ user, onClose, t }) {
     setLoading(true);
     let imageUrl = '';
     try {
-      if (image) imageUrl = await firebaseApi.uploadImage(image);
+      if (image) {
+        imageUrl = await firebaseApi.uploadImage(image);
+        if (!imageUrl) throw new Error("Не удалось загрузить изображение");
+      }
       await firebaseApi.saveRequest({ ...formData, imageUrl, status: 'pending' });
+      alert("Заявка успешно отправлена!");
       onClose();
     } catch (error) {
       console.error('Submit request error:', error);
+      alert("Ошибка при отправке: " + error.message);
     } finally {
       setLoading(false);
     }

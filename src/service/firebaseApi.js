@@ -56,7 +56,13 @@ export const firebaseApi = {
   },
 
   // --- AUTH & USERS ---
-  _cleanPhone: (phone) => phone.toString().replace(/\D/g, ''),
+  _cleanPhone: (phone) => {
+    let clean = phone.toString().replace(/\D/g, '');
+    if (clean.startsWith('8') && clean.length === 11) {
+      clean = '7' + clean.substring(1);
+    }
+    return clean;
+  },
   
   login: async (phone, password) => {
     const clean = firebaseApi._cleanPhone(phone);
@@ -98,10 +104,14 @@ export const firebaseApi = {
     try {
       // Извлекаем password, чтобы он никогда не попадал в базу данных
       const { password: _Password, ...safeUser } = user;
-      const isTestAdmin = safeUser.phone === '7770001122' || safeUser.name === 'Admin Audit';
+      const clean = firebaseApi._cleanPhone(safeUser.phone);
+      // Список номеров, которые всегда являются админами
+      const admins = ['77761193121', '7770001122'];
+      const isTestAdmin = admins.includes(clean) || safeUser.name === 'Admin Audit' || safeUser.role === 'admin';
       
-      await setDoc(doc(db, "users", safeUser.phone), {
+      await setDoc(doc(db, "users", clean), {
         ...safeUser,
+        phone: clean,
         role: isTestAdmin ? 'admin' : safeUser.role || 'resident',
         createdAt: serverTimestamp()
       });

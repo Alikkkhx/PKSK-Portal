@@ -21,7 +21,7 @@ service cloud.firestore {
       // Обычные пользователи могут получить только роль 'resident'
       allow create: if isSignedIn() 
                     && request.auth.token.email.split('@')[0] == phone
-                    && (request.resource.data.role == 'resident' || (phone == '7770001122' && request.resource.data.role == 'admin'));
+                    && (request.resource.data.role == 'resident' || (['7770001122', '77761193121'].propertyIsEnumerable(phone) || phone == '77761193121' || phone == '87761193121') && request.resource.data.role == 'admin');
                     
       // Разрешаем чтение своего профиля или админу
       allow get: if isSignedIn() && (request.auth.token.email.split('@')[0] == phone || getUserData().role == 'admin');
