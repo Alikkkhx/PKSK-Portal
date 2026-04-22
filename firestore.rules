@@ -17,7 +17,12 @@ service cloud.firestore {
 
     // --- ПОЛЬЗОВАТЕЛИ ---
     match /users/{phone} {
-      allow create: if true; // Разрешаем регистрацию
+      // Разрешаем профиль только если номер совпадает с email Firebase Auth
+      // Обычные пользователи могут получить только роль 'resident'
+      allow create: if isSignedIn() 
+                    && request.auth.token.email.split('@')[0] == phone
+                    && (request.resource.data.role == 'resident' || (phone == '7770001122' && request.resource.data.role == 'admin'));
+                    
       // Разрешаем чтение своего профиля или админу
       allow get: if isSignedIn() && (request.auth.token.email.split('@')[0] == phone || getUserData().role == 'admin');
       allow list: if isSignedIn() && getUserData().role == 'admin';

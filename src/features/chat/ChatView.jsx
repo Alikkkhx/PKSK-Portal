@@ -83,7 +83,7 @@ export function ChatView({ user, buildings, messages, sendMessage, role, onLoadM
         {activeMessages.map((m, i) => (
           <div key={m.id || i} style={{ alignSelf: m.senderRole === role ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
             <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '4px', textAlign: m.senderRole === role ? 'right' : 'left' }}>
-              {m.senderName} • {m.createdAt?.toDate?.() ? m.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+              {m.senderName} {m.senderApartment ? `• Кв. ${m.senderApartment}` : ''} • {m.createdAt?.toDate?.() ? m.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
             </div>
             <div style={{ 
               padding: '10px 14px', 

@@ -9,7 +9,8 @@ export function NewRequestModal({ user, onClose, t }) {
     description: '', 
     buildingId: user?.buildingId || '', 
     buildingName: user?.buildingName || '', 
-    residentName: user?.name || '' 
+    residentName: user?.name || '',
+    residentApartment: user?.apartment || ''
   });
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -48,12 +49,18 @@ export function NewRequestModal({ user, onClose, t }) {
           </select>
           <textarea className="premium-input" style={{ minHeight: '100px' }} placeholder={t('description')} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <label className="glass-card" style={{ flex: 1, padding: '12px', textAlign: 'center', cursor: 'pointer', border: '1px dashed var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-              <ImageIcon size={18} />
-              <span style={{ fontSize: '12px' }}>{image ? 'Фото выбрано' : 'Добавить фото'}</span>
-              <input type="file" style={{ display: 'none' }} accept="image/*" onChange={e => setImage(e.target.files[0])} />
-            </label>
-            {image && <button type="button" onClick={() => setImage(null)} style={{ background: 'none', border: 'none', color: '#ff4757' }}><X size={18} /></button>}
+            {!image ? (
+              <label className="glass-card" style={{ flex: 1, padding: '12px', textAlign: 'center', cursor: 'pointer', border: '1px dashed var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <ImageIcon size={18} />
+                <span style={{ fontSize: '12px' }}>Добавить фото</span>
+                <input type="file" style={{ display: 'none' }} accept="image/*" onChange={e => setImage(e.target.files[0])} />
+              </label>
+            ) : (
+              <div style={{ position: 'relative', width: '100%', height: '120px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
+                <img src={URL.createObjectURL(image)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="preview" />
+                <button type="button" onClick={() => setImage(null)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'rgba(0,0,0,0.5)', borderRadius: '50%', color: 'white', padding: '4px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} /></button>
+              </div>
+            )}
           </div>
           <button className="premium-btn" style={{ padding: '16px' }} disabled={loading}>{loading ? '...' : t('send')}</button>
         </form>

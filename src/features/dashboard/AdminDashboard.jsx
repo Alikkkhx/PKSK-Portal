@@ -48,7 +48,7 @@ export function AdminDashboard({ t, requests, stats, onLoadMore, loadingHistory,
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                   <div>
                     <span style={{ fontWeight: 700 }}>{req.category}</span>
-                    <p style={{ fontSize: '11px', color: 'var(--neon-blue)', marginTop: '2px' }}>{req.buildingName} {req.residentName ? `• ${req.residentName}` : ''}</p>
+                    <p style={{ fontSize: '11px', color: 'var(--neon-blue)', marginTop: '2px' }}>{req.buildingName} {req.residentName ? `• ${req.residentName}` : ''} {req.residentApartment ? `• Кв. ${req.residentApartment}` : ''}</p>
                   </div>
                   <span style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '20px', background: statusColor[req.status] + '22', color: statusColor[req.status], fontWeight: 700, whiteSpace: 'nowrap' }}>
                     {statusLabel[req.status]}

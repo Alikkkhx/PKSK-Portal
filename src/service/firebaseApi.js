@@ -14,11 +14,40 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 export const firebaseApi = {
   // --- UPLOAD ---
-  uploadFile: async (file) => {
+  uploadImage: async (file) => {
     if (!file) return null;
     try {
+      const compressedBlob = await new Promise((resolve, reject) => {
+        if (!file.type.startsWith('image/')) {
+          resolve(file);
+          return;
+        }
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+          const img = new Image();
+          img.src = event.target.result;
+          img.onload = () => {
+            let width = img.width;
+            let height = img.height;
+            if (width > 800) {
+              height = Math.round(height * (800 / width));
+              width = 800;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.8);
+          };
+          img.onerror = reject;
+        };
+        reader.onerror = reject;
+      });
+
       const storageRef = ref(storage, `uploads/${Date.now()}_${file.name}`);
-      const snapshot = await uploadBytes(storageRef, file);
+      const snapshot = await uploadBytes(storageRef, compressedBlob);
       return await getDownloadURL(snapshot.ref);
     } catch (e) {
       console.error("Upload error:", e);
@@ -67,10 +96,13 @@ export const firebaseApi = {
   onAuth: (callback) => onAuthStateChanged(auth, callback),
   saveUser: async (user) => {
     try {
-      const isTestAdmin = user.phone === '7770001122' || user.name === 'Admin Audit';
-      await setDoc(doc(db, "users", user.phone), {
-        ...user,
-        role: isTestAdmin ? 'admin' : user.role || 'resident',
+      // Извлекаем password, чтобы он никогда не попадал в базу данных
+      const { password: _Password, ...safeUser } = user;
+      const isTestAdmin = safeUser.phone === '7770001122' || safeUser.name === 'Admin Audit';
+      
+      await setDoc(doc(db, "users", safeUser.phone), {
+        ...safeUser,
+        role: isTestAdmin ? 'admin' : safeUser.role || 'resident',
         createdAt: serverTimestamp()
       });
     } catch (e) {
@@ -145,10 +177,14 @@ export const firebaseApi = {
   },
 
   // --- BUILDINGS (SERVERS) ---
-  listenBuildings: (callback) => {
-    return onSnapshot(collection(db, "buildings"), (snap) => {
-      callback(snap.docs.map(d => d.data()));
-    });
+  fetchBuildings: async () => {
+    try {
+      const snap = await getDocs(collection(db, "buildings"));
+      return snap.docs.map(d => d.data());
+    } catch (e) {
+      console.error("Error fetching buildings: ", e);
+      return [];
+    }
   },
   saveBuilding: async (building) => {
     try {

@@ -24,6 +24,7 @@ export function AppMain() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [buildings, setBuildings] = useState([]);
   const [showModal, setShowModal] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
 
   const store = useStore();
   const toast = useToast();
@@ -48,8 +49,24 @@ export function AppMain() {
   };
 
   useEffect(() => {
-    firebaseApi.listenBuildings(setBuildings);
-    const unsub = firebaseApi.onAuth(async (firebaseUser) => {
+    const handler = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallClick = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(() => setDeferredPrompt(null));
+    }
+  };
+
+  useEffect(() => {
+    firebaseApi.fetchBuildings().then(setBuildings);
+    const unsubAuth = firebaseApi.onAuth(async (firebaseUser) => {
       try {
         if (firebaseUser) {
           const email = firebaseUser.email || '';
@@ -62,8 +79,18 @@ export function AppMain() {
               localStorage.setItem('pksk_user', JSON.stringify(userData));
               fcmService.requestPermission(phone);
             } else {
-              // If auth exists but no Firestore data, logout to clear state
-              firebaseApi.logout();
+              // Анти-Race Condition: даем Firestore 2 секунды на сохранение профиля 
+              // (так как onAuthStateChanged срабатывает быстрее, чем setDoc завершит запись)
+              setTimeout(async () => {
+                const retryData = await firebaseApi.getUser(phone);
+                if (retryData) {
+                  setUser({ ...retryData, uid: firebaseUser.uid });
+                  localStorage.setItem('pksk_user', JSON.stringify(retryData));
+                  fcmService.requestPermission(phone);
+                } else {
+                  firebaseApi.logout();
+                }
+              }, 2000);
             }
           }
         } else {
@@ -76,7 +103,9 @@ export function AppMain() {
         setIsLoading(false);
       }
     });
-    return () => unsub();
+    return () => {
+      unsubAuth();
+    };
   }, [setIsLoading]);
 
   useEffect(() => {
@@ -97,8 +126,16 @@ export function AppMain() {
 
   const logout = () => firebaseApi.logout();
 
-  const sendMessage = async (text, role, name, buildingId, mode, recipient) => {
-    await firebaseApi.sendMessage({ text, senderRole: role, senderName: name, buildingId, mode, recipientId: recipient });
+  const sendMessage = async (text, mode, recipient) => {
+    await firebaseApi.sendMessage({ 
+      text, 
+      senderRole: user.role, 
+      senderName: user.name, 
+      senderApartment: user.apartment || '',
+      buildingId: user.buildingId, 
+      mode: mode || 'main', 
+      recipientId: recipient || 'all' 
+    });
   };
 
   const loadMoreMessages = async () => {
@@ -152,6 +189,18 @@ export function AppMain() {
             />
           )}
           {showModal && user && <NewRequestModal user={user} onClose={() => setShowModal(false)} t={t} />}
+          {deferredPrompt && (
+            <div style={{ position: 'fixed', bottom: '90px', left: '16px', right: '16px', background: 'rgba(10, 14, 23, 0.9)', border: '1px solid var(--neon-blue)', padding: '16px', borderRadius: '12px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 4px 20px rgba(0, 101, 255, 0.4)', backdropFilter: 'blur(10px)' }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>Установить приложение 📱</h4>
+                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-dim)' }}>Установите Smart PKSK на главный экран для быстрого доступа и оффлайн режима</p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button onClick={() => setDeferredPrompt(null)} style={{ background: 'transparent', border: '1px solid var(--glass-border)', color: 'white', borderRadius: '8px', fontSize: '12px', padding: '8px 16px', cursor: 'pointer' }}>Отмена</button>
+                <button onClick={handleInstallClick} style={{ background: 'var(--neon-blue)', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}>Установить</button>
+              </div>
+            </div>
+          )}
         </div>
       </I18nContext.Provider>
     </AuthContext.Provider>

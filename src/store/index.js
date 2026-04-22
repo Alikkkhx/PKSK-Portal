@@ -1,7 +1,6 @@
 import { create } from 'zustand';
-import { firebaseApi } from '../service/firebaseApi';
 
-export const useStore = create((set, get) => ({
+export const useStore = create((set) => ({
   messages: [],
   requests: [],
   hasMoreMessages: true,
@@ -9,18 +8,45 @@ export const useStore = create((set, get) => ({
   isLoading: true,
   historyLoading: false,
 
-  setMessages: (messages) => set({ messages, isLoading: false }),
-  setRequests: (requests) => set({ requests, isLoading: false }),
+  setMessages: (newMessages) => set((state) => {
+    const map = new Map();
+    state.messages.forEach(m => map.set(m.id, m));
+    newMessages.forEach(m => map.set(m.id, m));
+    const merged = Array.from(map.values()).sort((a, b) => 
+      (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)
+    );
+    return { messages: merged, isLoading: false };
+  }),
 
-  addOlderMessages: (older) => set((state) => ({
-    messages: [...older.reverse(), ...state.messages],
-    hasMoreMessages: older.length === 20
-  })),
+  setRequests: (newRequests) => set((state) => {
+    const map = new Map();
+    state.requests.forEach(r => map.set(r.id, r));
+    newRequests.forEach(r => map.set(r.id, r));
+    const merged = Array.from(map.values()).sort((a, b) => 
+      (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
+    );
+    return { requests: merged, isLoading: false };
+  }),
 
-  addOlderRequests: (older) => set((state) => ({
-    requests: [...state.requests, ...older],
-    hasMoreRequests: older.length === 15
-  })),
+  addOlderMessages: (older) => set((state) => {
+    const map = new Map();
+    state.messages.forEach(m => map.set(m.id, m));
+    older.forEach(m => map.set(m.id, m));
+    const merged = Array.from(map.values()).sort((a, b) => 
+      (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)
+    );
+    return { messages: merged, hasMoreMessages: older.length === 20 };
+  }),
+
+  addOlderRequests: (older) => set((state) => {
+    const map = new Map();
+    state.requests.forEach(r => map.set(r.id, r));
+    older.forEach(r => map.set(r.id, r));
+    const merged = Array.from(map.values()).sort((a, b) => 
+      (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
+    );
+    return { requests: merged, hasMoreRequests: older.length === 15 };
+  }),
 
   setHistoryLoading: (historyLoading) => set({ historyLoading }),
   setIsLoading: (isLoading) => set({ isLoading })
