@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Settings } from 'lucide-react';
-import { firebaseApi } from '../../service/firebaseApi';
+import { authService } from '../../service/api/authService';
+import { userService } from '../../service/api/userService';
 
 export function RegisterView({ onRegister, onSwitchToLogin, buildings, t }) {
   const [formData, setFormData] = useState({
@@ -14,10 +14,22 @@ export function RegisterView({ onRegister, onSwitchToLogin, buildings, t }) {
 
   const handleRegister = async (e) => {
     e.preventDefault();
+    if (!formData.buildingId) return alert("Выберите ЖК для регистрации");
+    
     setLoading(true);
     try {
-      const userData = await firebaseApi.register(formData);
-      onRegister(userData);
+      // 1. Создание Auth-аккаунта
+      const user = await authService.register(formData.phone, formData.password);
+      
+      // 2. Создание SaaS-профиля
+      const { password, ...profileData } = formData;
+      await userService.saveProfile(user.uid, {
+        ...profileData,
+        email: user.email,
+        createdAt: new Date().toISOString()
+      });
+      
+      // AppMain подхватит профиль автоматически через onAuth
     } catch (err) {
       alert('Ошибка регистрации: ' + err.message);
     } finally {

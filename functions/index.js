@@ -1,64 +1,74 @@
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
-const admin = require("firebase-admin");
-
+const functions = require('firebase-functions');
+const admin = require('firebase-admin');
 admin.initializeApp();
 
-exports.onMessageCreate = onDocumentCreated("messages/{messageId}", async (event) => {
-  const message = event.data.data();
-  const { text, senderName, buildingId, mode, recipientId } = message;
+const db = admin.firestore();
 
-  console.log(`New message from ${senderName} in building ${buildingId}`);
+/**
+ * 📲 Push-уведомление при новом сообщении
+ * Срабатывает на создание документа в подколлекции messages любого чата
+ */
+exports.notifyOnNewMessage = functions.firestore
+  .document('chats/{chatId}/messages/{messageId}')
+  .onCreate(async (snap, context) => {
+    const newMessage = snap.data();
+    const { chatId } = context.params;
 
-  try {
-    let tokens = [];
+    // 1. Получаем метаданные чата (участников)
+    const chatSnap = await db.doc(`chats/${chatId}`).get();
+    const chatData = chatSnap.data();
 
-    if (mode === 'resident' && recipientId) {
-      // Private message to a specific resident
-      const userDoc = await admin.firestore().collection("users").doc(recipientId).get();
-      if (userDoc.exists && userDoc.data().fcmTokens) {
-        tokens = userDoc.data().fcmTokens;
-      }
-    } else {
-      // General message to building
-      // To scale 1000+, we would use Topics, but for now we query building members
-      const usersSnap = await admin.firestore().collection("users")
-        .where("buildingId", "==", buildingId)
-        .get();
-      
-      usersSnap.forEach(doc => {
-        const data = doc.data();
-        if (data.fcmTokens) {
-          tokens = tokens.concat(data.fcmTokens);
-        }
-      });
-    }
-
-    // Filter out duplicates and empty values
-    const uniqueTokens = [...new Set(tokens)].filter(t => !!t);
-
-    if (uniqueTokens.length === 0) {
-      console.log("No FCM tokens found for target recipients.");
-      return;
-    }
-
+    // 2. Рассылаем Push всем участникам, кроме отправителя
     const payload = {
       notification: {
-        title: `Новое сообщение: ${senderName}`,
-        body: text.length > 100 ? text.substring(0, 97) + "..." : text,
-        icon: "/pwa-192x192.png",
+        title: 'Новое сообщение',
+        body: newMessage.text.length > 50 ? newMessage.text.substring(0, 50) + '...' : newMessage.text,
+        clickAction: `https://pksk-service.web.app/chat/${chatId}`
       },
-      tokens: uniqueTokens
+      data: {
+        chatId: chatId,
+        senderId: newMessage.senderId
+      }
     };
 
-    const response = await admin.messaging().sendEachForMulticast(payload);
-    console.log(`Successfully sent ${response.successCount} notifications.`);
-
-    // Optional: Cleanup invalid tokens
-    if (response.failureCount > 0) {
-      console.log(`${response.failureCount} tokens failed.`);
+    const tokens = [];
+    for (const uid of chatData.participants) {
+      if (uid !== newMessage.senderId) {
+        const userSnap = await db.doc(`users/${uid}`).get();
+        const pushToken = userSnap.data()?.pushToken;
+        if (pushToken) tokens.push(pushToken);
+      }
     }
 
-  } catch (error) {
-    console.error("Error sending notification:", error);
-  }
-});
+    if (tokens.length > 0) {
+      return admin.messaging().sendToDevice(tokens, payload);
+    }
+    return null;
+  });
+
+/**
+ * 📊 Агрегация статистики заявок по ЖК
+ * Обновляет сводный отчет здания при каждом изменении заявки
+ */
+exports.aggregateBuildingStats = functions.firestore
+  .document('requests/{requestId}')
+  .onWrite(async (change, context) => {
+    const data = change.after.exists ? change.after.data() : change.before.data();
+    const { buildingId } = data;
+
+    if (!buildingId) return null;
+
+    // Считаем текущие показатели в коллекции 'requests' для этого ЖК
+    const allReqs = await db.collection('requests').where('buildingId', '==', buildingId).get();
+    
+    const stats = {
+      total: allReqs.size,
+      pending: allReqs.docs.filter(d => d.data().status === 'pending').length,
+      inProgress: allReqs.docs.filter(d => d.data().status === 'progress').length,
+      completed: allReqs.docs.filter(d => d.data().status === 'completed').length,
+      lastUpdate: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    // Сохраняем в метаданные здания или отдельную коллекцию
+    return db.doc(`building_stats/${buildingId}`).set(stats, { merge: true });
+  });

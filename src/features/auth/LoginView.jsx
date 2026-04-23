@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { User, Settings } from 'lucide-react';
-import { firebaseApi } from '../../service/firebaseApi';
+import { Settings } from 'lucide-react';
+import { authService } from '../../service/api/authService';
 
 export function LoginView({ onLogin, onSwitchToRegister, t, lang, toggleLang }) {
   const [phone, setPhone] = useState('');
@@ -14,11 +14,10 @@ export function LoginView({ onLogin, onSwitchToRegister, t, lang, toggleLang }) 
     if (!phone || !password) return;
     setLoading(true);
     setError('');
-    const cleanPhone = phone.replace(/\s/g, '');
     
     try {
-      const userData = await firebaseApi.login(cleanPhone, password);
-      onLogin(userData);
+      await authService.login(phone, password);
+      // AppMain подхватит сессию через onAuth автоматически
     } catch (err) {
       if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         setError('Неверный пароль.');
@@ -39,7 +38,7 @@ export function LoginView({ onLogin, onSwitchToRegister, t, lang, toggleLang }) 
           <Settings size={32} color="white" />
         </div>
         <h2 style={{ fontSize: '24px', fontWeight: 800, letterSpacing: '-0.5px' }}>{t('login_title')}</h2>
-        <p style={{ color: 'var(--text-dim)', fontSize: '14px', marginTop: '8px' }}>Smart PKSK Portal v2.0</p>
+        <p style={{ color: 'var(--text-dim)', fontSize: '14px', marginTop: '8px' }}>Smart PKSK Portal v4.0 (Enterprise-Grade)</p>
       </div>
 
       <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

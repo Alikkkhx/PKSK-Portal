@@ -2,61 +2,83 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Вспомогательная функция для проверки авторизации
-    function isSignedIn() {
-      return request.auth != null;
-    }
+    // --- Помощники ---
+    function isSignedIn() { return request.auth != null; }
+    function getUserData() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     
-    // Вспомогательная функция для получения данных текущего пользователя
-    function getUserData() {
-      // Ищем пользователя по UID (рекомендуется) или по номеру телефона
-      // Для текущей структуры иерархия документов может быть сложной.
-      // Предположим, мы храним UID в документе пользователя.
-      return get(/databases/$(database)/documents/users/$(request.auth.token.email.split('@')[0])).data;
+    // Проверка глобального админа (без привязки к ЖК)
+    function isGlobalAdmin() { 
+      let user = getUserData();
+      return user.role in ['super_admin', 'admin'] && (user.buildingId == null || user.buildingId == '');
     }
 
-    // --- ПОЛЬЗОВАТЕЛИ ---
-    match /users/{phone} {
-      // Разрешаем профиль только если номер совпадает с email Firebase Auth
-      // Обычные пользователи могут получить только роль 'resident'
-      allow create: if isSignedIn() 
-                    && request.auth.token.email.split('@')[0] == phone
-                    && (request.resource.data.role == 'resident' || (['7770001122', '77761193121'].propertyIsEnumerable(phone) || phone == '77761193121' || phone == '87761193121') && request.resource.data.role == 'admin');
-                    
-      // Разрешаем чтение своего профиля или админу
-      allow get: if isSignedIn() && (request.auth.token.email.split('@')[0] == phone || getUserData().role == 'admin');
-      allow list: if isSignedIn() && getUserData().role == 'admin';
+    function isRole(role) { return getUserData().role == role; }
+    function hasRole(roles) { return getUserData().role in roles; }
+    function isSameBuilding(buildingId) { return getUserData().buildingId == buildingId; }
+
+    // --- Пользователи ---
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.auth.uid == userId || isRole('super_admin'));
     }
-    
-    // --- СООБЩЕНИЯ ---
-    match /messages/{messageId} {
-      // Разрешаем чтение, если пользователь состоит в этом ЖК или админ
+
+    // --- Чаты ---
+    match /chats/{chatId} {
       allow read: if isSignedIn() && (
-        resource.data.buildingId == getUserData().buildingId || 
-        getUserData().role == 'admin'
+        request.auth.uid in resource.data.participants || 
+        hasRole(['super_admin', 'admin']) ||
+        (hasRole(['building_admin', 'operator']) && isSameBuilding(resource.data.buildingId))
       );
-      // Разрешаем писать сообщения в свой ЖК
-      allow create: if isSignedIn() && (
-        request.resource.data.buildingId == getUserData().buildingId || 
-        getUserData().role == 'admin'
-      );
-      allow update, delete: if isSignedIn() && getUserData().role == 'admin';
+      allow create, update: if isSignedIn();
+      
+      match /messages/{messageId} {
+        allow read: if isSignedIn(); 
+        allow create: if isSignedIn() && (request.auth.uid == request.resource.data.senderId);
+      }
     }
-    
-    // --- ЗАЯВКИ ---
+
+    match /user_chats/{userChatId} {
+      allow read, write: if isSignedIn() && (
+        request.auth.uid == resource.data.userId || 
+        request.auth.uid == request.resource.data.userId ||
+        hasRole(['super_admin', 'admin'])
+      );
+    }
+
+    // --- Заявки ---
     match /requests/{requestId} {
       allow read: if isSignedIn() && (
-        resource.data.buildingId == getUserData().buildingId || 
-        getUserData().role == 'admin'
+        request.auth.uid == resource.data.residentUid || 
+        isGlobalAdmin() ||
+        (hasRole(['building_admin', 'operator', 'admin']) && isSameBuilding(resource.data.buildingId))
       );
-      allow create: if isSignedIn(); 
-      allow update, delete: if isSignedIn() && getUserData().role == 'admin';
+      
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isGlobalAdmin() ||
+        (hasRole(['building_admin', 'operator', 'admin']) && isSameBuilding(resource.data.buildingId))
+      );
     }
-    
-    // --- ЗДАНИЯ ---
+
+    // --- Системные Логи ---
+    match /system_logs/{logId} {
+      allow create: if isSignedIn(); 
+      // Разрешаем чтение всем администраторам для мониторинга
+      allow read, list: if isSignedIn() && hasRole(['super_admin', 'admin']);
+    }
+
+    // --- Инфраструктура ---
     match /buildings/{buildingId} {
-      allow read: if true; // Нужно для регистрации
-      allow write: if isSignedIn() && getUserData().role == 'admin';
+      allow read: if true; 
+      allow write: if isSignedIn() && isRole('super_admin');
+    }
+
+    match /building_sites/{buildingId} {
+      allow read: if true; 
+      allow write: if isSignedIn() && (
+        isRole('super_admin') || 
+        (hasRole(['building_admin', 'admin']) && isSameBuilding(buildingId))
+      );
     }
   }
 }

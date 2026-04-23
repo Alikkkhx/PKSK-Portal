@@ -6,13 +6,15 @@ import { AdminDashboard } from '../features/dashboard/AdminDashboard';
 import { ChatView } from '../features/chat/ChatView';
 import { ProfileView } from '../features/dashboard/ProfileView';
 import { AdminControlCenter } from '../features/management/AdminControlCenter';
+import { BuildingSiteView } from '../features/management/BuildingSiteView';
 
 export function MainView({ 
   user, requests, setRequests, messages, setMessages, 
   sendMessage, buildings, t, lang, toggleLang, logout, 
   isLoading, setShowModal, loadingHistory, 
   hasMoreMessages, hasMoreRequests, 
-  loadMoreMessages, loadMoreRequests 
+  loadMoreMessages, loadMoreRequests,
+  refreshBuildings
 }) {
   const [activeTab, setActiveTab] = useState(user.role === 'admin' ? 'admin' : 'dashboard');
 
@@ -60,16 +62,15 @@ export function MainView({
                 hasMore={hasMoreRequests} isLoading={isLoading} 
               />
             )}
-            {activeTab === 'chat' && (
-              <ChatView 
-                user={user} buildings={buildings} messages={messages} 
-                sendMessage={sendMessage} role={user.role} 
-                onLoadMore={loadMoreMessages} loadingHistory={loadingHistory} 
-                hasMore={hasMoreMessages} 
-              />
-            )}
+      {activeTab === 'chat' && (
+        <ChatView 
+          user={user} buildings={buildings} 
+          sendMessage={sendMessage} role={user.role} 
+        />
+      )}
             {activeTab === 'profile' && <ProfileView user={user} />}
-            {activeTab === 'servers' && <AdminControlCenter buildings={buildings} />}
+            {activeTab === 'servers' && <AdminControlCenter buildings={buildings} onRefresh={refreshBuildings} />}
+            {activeTab === 'home' && <BuildingSiteView buildingId={user.buildingId} role={user.role} t={t} />}
           </motion.main>
         </AnimatePresence>
       </div>
@@ -88,6 +89,9 @@ export function MainView({
         )}
         <button className={`tab-item ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
           <MessageCircle size={20} /> <span style={{ fontSize: '10px' }}>Чат</span>
+        </button>
+        <button className={`tab-item ${activeTab === 'home' ? 'active' : ''}`} onClick={() => setActiveTab('home')}>
+          <Info size={20} /> <span style={{ fontSize: '10px' }}>Дом</span>
         </button>
         {user.role === 'admin' && (
           <button className={`tab-item ${activeTab === 'servers' ? 'active' : ''}`} onClick={() => setActiveTab('servers')}>

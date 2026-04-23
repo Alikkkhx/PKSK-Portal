@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Image as ImageIcon } from 'lucide-react';
-import { firebaseApi } from '../../service/firebaseApi';
+import { Image as ImageIcon, X } from 'lucide-react';
+import { requestService } from '../../service/api/requestService';
+import { useRequestStore } from '../../store/requestStore';
 
 export function NewRequestModal({ user, onClose, t }) {
   const [formData, setFormData] = useState({ 
@@ -15,6 +16,8 @@ export function NewRequestModal({ user, onClose, t }) {
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  const submitRequest = useRequestStore(state => state.submitRequest);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!user) return;
@@ -22,10 +25,16 @@ export function NewRequestModal({ user, onClose, t }) {
     let imageUrl = '';
     try {
       if (image) {
-        imageUrl = await firebaseApi.uploadImage(image);
+        // SaaS v3.1 Upload logic
+        imageUrl = await requestService.uploadRequestImage(user.buildingId, image);
         if (!imageUrl) throw new Error("Не удалось загрузить изображение");
       }
-      await firebaseApi.saveRequest({ ...formData, imageUrl, status: 'pending' });
+      // SaaS Workflow: Создаем через Store v3.0
+      await submitRequest(user.buildingId, user, { 
+        ...formData, 
+        title: formData.category, // Используем категорию как заголовок
+        imageUrl 
+      });
       alert("Заявка успешно отправлена!");
       onClose();
     } catch (error) {

@@ -1,118 +1,158 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Send, MessageCircle, Info, Clock, CheckCircle2, ChevronRight, User, Settings, Image as ImageIcon, Plus, X, Globe, MapPin, Search } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { 
+  Send, ChevronRight, User, Group, 
+  MessageCircle, Info, Clock, CheckCheck 
+} from 'lucide-react';
+import { useChatStore } from '../../store/chatStore';
+import { chatService } from '../../service/api/chatService';
 
-export function ChatView({ user, buildings, messages, sendMessage, role, onLoadMore, loadingHistory, hasMore }) {
-  const [msgInput, setMsgInput] = useState('');
-  const [recipientFilter, setRecipientFilter] = useState('all');
-  const [activeTab, setActiveTab] = useState('main'); // 'main' or 'resident'
-  const [selectedBuilding, setSelectedBuilding] = useState(user.buildingId || (buildings[0]?.id || ''));
+export function ChatView({ user, buildings, role }) {
+  const [selectedChat, setSelectedChat] = useState(null);
+  const [text, setText] = useState('');
   const scrollRef = useRef(null);
+  
+  // Enterprise Optimization: Точечные селекторы для исключения лишних ререндеров
+  const inbox = useChatStore(s => s.inbox);
+  const activeChatMessages = useChatStore(s => s.activeChatMessages);
+  const sendMessage = useChatStore(s => s.sendMessage);
+  const subscribeToChat = useChatStore(s => s.subscribeToChat);
 
-  const activeMessages = role === 'admin' 
-    ? messages.filter(m => m.buildingId === selectedBuilding && (m.mode === activeTab))
-    : messages;
-
+  // Авто-скролл при новых сообщениях
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [activeMessages.length]);
+  }, [activeChatMessages]);
 
-  const handleSend = () => {
-    if (!msgInput.trim()) return;
-    sendMessage(msgInput, activeTab, recipientFilter);
-    setMsgInput('');
+  const handleStartChat = async () => {
+    if (!user.buildingId) {
+      alert("Ошибка: У вашего профиля не привязано здание.");
+      return;
+    }
+    const admin = await chatService.findBuildingAdmin(user.buildingId);
+    if (!admin) {
+      alert("Администрация вашего ЖК еще не подключена к системе чатов.");
+      return;
+    }
+    await handleSelectChat(admin);
+  };
+
+  const handleSelectChat = async (targetUser) => {
+    const chatId = chatService.getPrivateChatId(user.uid, targetUser.uid);
+    const participants = [user.uid, targetUser.uid];
+    
+    // Создаем чат в базе, если его еще нет
+    await chatService.getOrCreateChat(chatId, participants, {
+      buildingId: user.buildingId,
+      type: 'private'
+    });
+
+    setSelectedChat({ id: chatId, title: targetUser.name, participants });
+    subscribeToChat(user.uid, chatId);
+  };
+
+  const handleSend = async (e) => {
+    e.preventDefault();
+    if (!text.trim() || !selectedChat) return;
+    
+    await sendMessage(selectedChat.id, user.uid, text, selectedChat.participants);
+    setText('');
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="glass-card" style={{ height: 'calc(100vh - 180px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Header */}
-      <div style={{ padding: '16px', borderBottom: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="glass-card" style={{ height: 'calc(100vh - 180px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      
+      {/* HEADER */}
+      <div style={{ padding: '16px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div className="status-dot pulse" />
-          <h3 style={{ fontSize: '16px' }}>Чат {role === 'admin' ? '- Управление' : ''}</h3>
+          {selectedChat && (
+            <button onClick={() => setSelectedChat(null)} style={{ background: 'none', border: 'none', color: 'var(--neon-blue)' }}>
+              <ChevronRight size={20} style={{ transform: 'rotate(180deg)' }} />
+            </button>
+          )}
+          <h3 style={{ fontSize: '16px', fontWeight: 800 }}>
+            {selectedChat ? selectedChat.title : 'Мессенджер Pro'}
+          </h3>
         </div>
-        {role === 'admin' && (
-          <select 
-            className="premium-input" 
-            style={{ width: 'auto', padding: '4px 8px', fontSize: '13px' }}
-            value={selectedBuilding}
-            onChange={(e) => setSelectedBuilding(e.target.value)}
-          >
-            {buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        )}
       </div>
 
-      {/* Tabs for Admin */}
-      {role === 'admin' && (
-        <div style={{ display: 'flex', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--glass-border)' }}>
-          <button 
-            style={{ flex: 1, padding: '12px', background: activeTab === 'main' ? 'rgba(255,255,255,0.05)' : 'transparent', border: 'none', color: activeTab === 'main' ? 'var(--neon-blue)' : 'var(--text-dim)', fontSize: '13px' }}
-            onClick={() => setActiveTab('main')}
-          >
-            Общий чат
-          </button>
-          <button 
-            style={{ flex: 1, padding: '12px', background: activeTab === 'resident' ? 'rgba(255,255,255,0.05)' : 'transparent', border: 'none', color: activeTab === 'resident' ? 'var(--neon-blue)' : 'var(--text-dim)', fontSize: '13px' }}
-            onClick={() => setActiveTab('resident')}
-          >
-            Личные (уведомления)
-          </button>
-        </div>
-      )}
-
-      {/* Messages */}
-      <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }} ref={scrollRef}>
-        {hasMore && activeMessages.length >= 20 && (
-          <button 
-            style={{ background: 'transparent', border: 'none', color: 'var(--neon-blue)', fontSize: '12px', padding: '10px', cursor: 'pointer' }}
-            onClick={onLoadMore}
-            disabled={loadingHistory}
-          >
-            {loadingHistory ? '...' : '↑ Загрузить историю'}
-          </button>
-        )}
-        {activeMessages.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-dim)' }}>
-            <MessageCircle size={36} style={{ opacity: 0.3, marginBottom: '10px' }} />
-            <p>Нет сообщений</p>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        
+        {/* INBOX / CONTACTS LIST (If no chat selected) */}
+        {!selectedChat && (
+          <div style={{ width: '100%', overflowY: 'auto' }}>
+            {inbox.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', opacity: 0.5 }}>
+                <MessageCircle size={40} style={{ margin: 'auto', marginBottom: '10px' }} />
+                <p>Нет активных диалогов</p>
+                {role === 'resident' && (
+                  <button 
+                    className="premium-btn" 
+                    style={{ marginTop: '20px', padding: '10px 20px' }}
+                    onClick={handleStartChat}
+                  >
+                    Написать в ПКСК
+                  </button>
+                )}
+              </div>
+            ) : (
+              inbox.map(chat => (
+                <div 
+                  key={chat.chatId} 
+                  onClick={() => handleSelectChat({ uid: 'partner_uid', name: 'Собеседник' })} // Здесь должна быть логика поиска партнера
+                  style={{ padding: '16px', borderBottom: '1px solid var(--glass-border)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between' }}
+                >
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--accent-gradient)' }} />
+                    <div>
+                      <div style={{ fontWeight: 700 }}>Диалог</div>
+                      <div style={{ fontSize: '12px', opacity: 0.6 }}>Нажмите, чтобы открыть</div>
+                    </div>
+                  </div>
+                  {chat.unreadCount > 0 && (
+                    <div style={{ background: '#ff4b2b', color: 'white', borderRadius: '10px', padding: '2px 8px', fontSize: '10px', height: '18px', fontWeight: 800 }}>
+                      {chat.unreadCount}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         )}
-        {activeMessages.map((m, i) => (
-          <div key={m.id || i} style={{ alignSelf: m.senderRole === role ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
-            <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '4px', textAlign: m.senderRole === role ? 'right' : 'left' }}>
-              {m.senderName} {m.senderApartment ? `• Кв. ${m.senderApartment}` : ''} • {m.createdAt?.toDate?.() ? m.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
-            </div>
-            <div style={{ 
-              padding: '10px 14px', 
-              borderRadius: '16px', 
-              background: m.senderRole === role ? 'var(--neon-blue)' : 'rgba(255,255,255,0.08)',
-              color: m.senderRole === role ? 'white' : 'var(--text-main)',
-              fontSize: '14px',
-              border: m.senderRole === role ? 'none' : '1px solid var(--glass-border)'
-            }}>
-              {m.text}
-            </div>
-          </div>
-        ))}
-      </div>
 
-      {/* Input */}
-      <div style={{ padding: '16px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '10px' }}>
-        <input 
-          className="premium-input" 
-          placeholder="Напишите сообщение..." 
-          value={msgInput}
-          onChange={(e) => setMsgInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-        />
-        <button className="premium-btn" style={{ padding: '0 16px' }} onClick={handleSend}>
-          <Send size={18} />
-        </button>
+        {/* MESSAGES VIEW */}
+        {selectedChat && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <div ref={scrollRef} style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {activeChatMessages.map((msg) => (
+                <div key={msg.id} style={{ alignSelf: msg.senderId === user.uid ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
+                  <div className={`message-bubble ${msg.senderId === user.uid ? 'sent' : 'received'}`} 
+                       style={{ padding: '10px 14px', borderRadius: '18px', background: msg.senderId === user.uid ? 'var(--accent-gradient)' : 'rgba(255,255,255,0.05)' }}>
+                    <div style={{ fontSize: '14px' }}>{msg.text}</div>
+                    <div style={{ fontSize: '9px', textAlign: 'right', marginTop: '4px', opacity: 0.6 }}>
+                      {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+                      {msg.senderId === user.uid && <CheckCheck size={10} style={{ marginLeft: '4px' }} />}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* INPUT */}
+            <form onSubmit={handleSend} style={{ padding: '16px', borderTop: '1px solid var(--glass-border)', display: 'flex', gap: '10px' }}>
+              <input 
+                className="premium-input" 
+                placeholder="Сообщение..." 
+                value={text} 
+                onChange={e => setText(e.target.value)} 
+              />
+              <button className="premium-btn" style={{ padding: '10px' }}><Send size={18} /></button>
+            </form>
+          </div>
+        )}
+
       </div>
-    </motion.div>
+    </div>
   );
 }
-

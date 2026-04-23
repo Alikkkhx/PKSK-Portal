@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export const useStore = create((set) => ({
   messages: [],
+  personalMessages: [],
   requests: [],
   hasMoreMessages: true,
   hasMoreRequests: true,
@@ -16,6 +17,16 @@ export const useStore = create((set) => ({
       (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)
     );
     return { messages: merged, isLoading: false };
+  }),
+
+  setPersonalMessages: (newMessages) => set((state) => {
+    const map = new Map();
+    state.personalMessages.forEach(m => map.set(m.id, m));
+    newMessages.forEach(m => map.set(m.id, m));
+    const merged = Array.from(map.values()).sort((a, b) => 
+      (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)
+    );
+    return { personalMessages: merged };
   }),
 
   setRequests: (newRequests) => set((state) => {
